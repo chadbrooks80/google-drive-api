@@ -4,17 +4,28 @@ const path = require("path");
 
 const app = express();
 
-// --- Google Drive setup ---
-const KEYFILEPATH = path.join(__dirname, "service-key.json");
+/* ---------- Google Drive setup (env var first, file fallback) ---------- */
 const SCOPES = ["https://www.googleapis.com/auth/drive.readonly"];
 
-const auth = new google.auth.GoogleAuth({
-  keyFile: KEYFILEPATH,
-  scopes: SCOPES,
-});
+let auth;
+if (process.env.GOOGLE_KEY) {
+  // On Render: read the entire service account JSON from env var
+  const serviceAccount = JSON.parse(process.env.GOOGLE_KEY);
+  auth = new google.auth.GoogleAuth({
+    credentials: serviceAccount,
+    scopes: SCOPES,
+  });
+} else {
+  // Local dev: use the JSON file on disk
+  const KEYFILEPATH = path.join(__dirname, "service-key.json");
+  auth = new google.auth.GoogleAuth({
+    keyFile: KEYFILEPATH,
+    scopes: SCOPES,
+  });
+}
 const drive = google.drive({ version: "v3", auth });
 
-// --- Helper: build simple HTML ---
+/* ---------- Simple HTML helper ---------- */
 function htmlPage(title, body) {
   return `
   <!DOCTYPE html>
@@ -33,7 +44,7 @@ function htmlPage(title, body) {
   </html>`;
 }
 
-// --- Route: list files in Drive ---
+/* ---------- Routes ---------- */
 app.get("/list", async (req, res) => {
   try {
     const response = await drive.files.list({
@@ -41,7 +52,7 @@ app.get("/list", async (req, res) => {
       fields: "files(id, name)",
     });
 
-    const files = response.data.files;
+    const files = response.data.files || [];
     if (!files.length) {
       return res.send(htmlPage("Drive Files", "<p>No files found.</p>"));
     }
@@ -53,16 +64,13 @@ app.get("/list", async (req, res) => {
       )
       .join("");
 
-    res.send(
-      htmlPage("Drive Files", `<h2>Files</h2><ul>${listItems}</ul>`)
-    );
+    res.send(htmlPage("Drive Files", `<h2>Files</h2><ul>${listItems}</ul>`));
   } catch (err) {
     console.error("❌ Error listing files:", err.message);
     res.status(500).send(htmlPage("Error", `<pre>${err.message}</pre>`));
   }
 });
 
-// --- Route: fetch file contents ---
 app.get("/request", async (req, res) => {
   const fileId = req.query.id;
   if (!fileId) {
@@ -70,12 +78,11 @@ app.get("/request", async (req, res) => {
   }
 
   try {
-    // Try exporting as plain text first (works for Google Docs)
+    // Google Docs export to plain text
     const file = await drive.files.export(
       { fileId, mimeType: "text/plain" },
       { responseType: "text" }
     );
-
     const content =
       typeof file.data === "string" ? file.data : JSON.stringify(file.data);
 
@@ -95,6 +102,8 @@ app.get("/request", async (req, res) => {
   }
 });
 
-// --- Start server ---
+/* ---------- Start server ---------- */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server live at http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`🚀 Server live at http://localhost:${PORT}`)
+);
